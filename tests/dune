@@ -1,0 +1,14 @@
+(executable
+ (name test)
+ (modules test)
+ (libraries cmon))
+
+(rule
+ (alias runtest)
+ (action
+  (with-stdout-to test.exe.output (run %{exe:test.exe}))))
+
+(rule
+ (alias runtest)
+ (deps test.exe)
+ (action (diff test.expected test.exe.output)))

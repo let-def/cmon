@@ -1,0 +1,264 @@
+unit:
+()
+
+false:
+false
+
+true:
+true
+
+0:
+0
+
+1:
+1
+
+2:
+2
+
+-1:
+-1
+
+-2:
+-2
+
+max_int:
+4611686018427387903
+
+min_int:
+-4611686018427387904
+
+0.:
+0.
+
+1.:
+1.
+
+-0.:
+-0.
+
+-1.:
+-1.
+
++inf:
+infinity
+
+-inf:
+neg_infinity
+
+nan:
+nan
+
+max_float:
+1.79769313486231571e+308
+
+min_float:
+2.22507385850720138e-308
+
+'a':
+'a'
+
+'\x00':
+'\000'
+
+'\xFF':
+'\255'
+
+'\t':
+'\t'
+
+'\n':
+'\n'
+
+"foo":
+"foo"
+
+"\"foo\"":
+"\"foo\""
+
+"foo\nbar":
+"foo\nbar"
+
+(1, true):
+(1, true)
+
+(1, true, ...):
+(1, true, 1, true, 1, true)
+
+(1, true, ..., ...):
+(
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true,
+  1,
+  true
+)
+
+[1; true]:
+[ 1; true ]
+
+[1; true; ...]:
+[ 1; true; 1; true; 1; true ]
+
+[1; true; ...; ...]:
+[
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true;
+  1;
+  true
+]
+
+1 :: true :: xs:
+1 :: true :: xs
+
+1 :: true :: ... :: xs:
+1 :: true :: 1 :: true :: 1 :: true :: xs
+
+1 :: true :: ... ... :: xs:
+1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: 1
+:: true
+:: xs
+
+
+nested-1:
+[ ([ (); [] ], ([], ())); [ ([], ()); [ (); [] ] ] ]
+
+nested-2:
+(
+  [
+    (
+      [ ([ (); [] ], ([], ())); [ ([], ()); [ (); [] ] ] ],
+      ([ ([], ()); [ (); [] ] ], ([ (); [] ], ([], ())))
+    );
+    [
+      ([ ([], ()); [ (); [] ] ], ([ (); [] ], ([], ())));
+      [ ([ (); [] ], ([], ())); [ ([], ()); [ (); [] ] ] ]
+    ]
+  ],
+  (
+    [
+      ([ ([], ()); [ (); [] ] ], ([ (); [] ], ([], ())));
+      [ ([ (); [] ], ([], ())); [ ([], ()); [ (); [] ] ] ]
+    ],
+    (
+      [ ([ (); [] ], ([], ())); [ ([], ()); [ (); [] ] ] ],
+      ([ ([], ()); [ (); [] ] ], ([ (); [] ], ([], ())))
+    )
+  )
+)
+
+data-constructors-1:
+(None, Some (), Pair (1, 2))
+
+data-constructors-2:
+(None, Some (), Pair (1, 2))
+
+record-1:
+{ contents = 1; }
+
+record-2:
+{ a = 1; b = true; }
+
+record-3:
+{ a = 1; b = true; a = 1; b = true; a = 1; b = true; }
+
+record-4:
+{
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+}
+
+inline-record-1:
+R1 { contents = 1; }
+
+inline-record-2:
+R2 { a = 1; b = true; }
+
+inline-record-3:
+R3 { a = 1; b = true; a = 1; b = true; a = 1; b = true; }
+
+inline-record-4:
+R4 {
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+  a = 1;
+  b = true;
+}
+
+shared-terms:
+let v0 = let v1 = ("test", 1) in (v1, v1) in
+(let v2 = let v3 = ("test", 1) in (v3, v3) in (v2, v2, v0), v0)
+
