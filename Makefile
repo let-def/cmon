@@ -9,3 +9,6 @@ test:
 
 promote:
 	dune promote
+
+build-install:
+	dune build @install
