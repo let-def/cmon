@@ -34,6 +34,9 @@ type syntax =
   | Bool of bool       (* true, false *)
   | Char of char       (* 'x' *)
   | Int of int         (* 0, 1, ... *)
+  | Int32 of int32     (* 0l, 1l, ... *)
+  | Int64 of int64     (* 0L, 1L, ... *)
+  | Nativeint of nativeint (* 0n, 1n, ... *)
   | Float of float     (* 0.0, 1.0, ... *)
   | Constant of string (* constant constructor, e.g None *)
   | Cons of {id: id; car: syntax; cdr: syntax} (* x :: xs *)
@@ -62,6 +65,15 @@ val char: char -> t
 
 val int: int -> t
 (** print an integer *)
+
+val int32: int32 -> t
+(** print a 32-bit integer *)
+
+val int64: int64 -> t
+(** print a 64-bit integer *)
+
+val nativeint: nativeint -> t
+(** print a native integer *)
 
 val float: float -> t
 (** print a floating point value *)

@@ -25,6 +25,9 @@ type syntax =
   | Bool of bool
   | Char of char
   | Int of int
+  | Int32 of int32
+  | Int64 of int64
+  | Nativeint of nativeint
   | Float of float
   | Constant of string
   | Cons of {id: id; car: syntax; cdr: syntax}
@@ -42,6 +45,9 @@ let unit = Unit
 let bool   data = Bool data
 let char   data = Char data
 let int    data = Int data
+let int32  data = Int32 data
+let int64  data = Int64 data
+let nativeint data = Nativeint data
 let float  data = Float data
 let string data = String {id=id(); data}
 let constant tag = Constant tag
@@ -73,14 +79,16 @@ let crecord tag data = constructor tag (unshared_record data)
 let unshared_crecord tag data = unshared_constructor tag (unshared_record data)
 
 let id_of = function
-  | Bool _ | Char _ | Int _ | Float _ | Nil | Unit | Constant _ -> unshared
+  | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
+  | Float _ | Nil | Unit | Constant _ -> unshared
   | Tuple {id; _} | Record {id; _} | Constructor {id; _} | Cons {id; _}
   | String {id; _} | Var id | Let {id; _} -> id
 
 let graph : t Fastdom.graph = {
   successors = begin fun f acc ->
     let rec aux acc = function
-      | Unit | Nil | Bool _ | Char _ | Int _ | Float _ | Constant _
+      | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
+      | Float _ | Nil | Unit | Constant _
       | String _ | Var _ | Let _ -> acc
       | Tuple {data; _} -> List.fold_left f_ acc data
       | Record {data; _} -> List.fold_left f_field acc data
@@ -145,7 +153,8 @@ let explicit_sharing t =
         else (bindings.(id), t)
     in
     let t = match t with
-      | Unit | Nil | Bool _ | Char _ | Int _ | Float _ | Constant _
+      | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
+      | Float _ | Nil | Unit | Constant _
       | String _ | Var _ | Let _ -> t
       | Tuple t ->
         unshared_tuple (List.map traverse_child t.data)
@@ -189,6 +198,9 @@ let rec sub_print_as_is =
   | Bool b  -> true, OCaml.bool b
   | Char c  -> true, OCaml.char c
   | Int  i  -> true, OCaml.int i
+  | Int32 i -> true, OCaml.int32 i
+  | Int64 i -> true, OCaml.int64 i
+  | Nativeint i -> true, OCaml.nativeint i
   | Float f -> true, OCaml.float f
   | Cons _ as self ->
     begin match list_of_cons [] self with
