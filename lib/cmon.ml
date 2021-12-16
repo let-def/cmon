@@ -35,6 +35,7 @@ type syntax =
   | Tuple of {id: id; data: syntax list}
   | Record of {id: id; data: (string * syntax) list}
   | Constructor of {id: id; tag: string; data: syntax}
+  | Array of {id: id; data: syntax array}
   | Var of id
   | Let of {id: id; bindings: (id * syntax) list; body: syntax}
 
@@ -63,7 +64,12 @@ let unshared_record data = Record {id=unshared; data}
 let unshared_cons car cdr = Cons {id=unshared; car; cdr}
 
 let list xs = List.fold_right cons xs nil
+let list_map f xs = list (List.map f xs)
 let unshared_list xs = List.fold_right unshared_cons xs nil
+
+let array data = Array{id=id(); data}
+let array_map f xs = array (Array.map f xs)
+let unshared_array data = Array {id=unshared; data}
 
 let construct tag = function
   | []  -> constant tag
@@ -82,7 +88,7 @@ let id_of = function
   | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
   | Float _ | Nil | Unit | Constant _ -> unshared
   | Tuple {id; _} | Record {id; _} | Constructor {id; _} | Cons {id; _}
-  | String {id; _} | Var id | Let {id; _} -> id
+  | String {id; _} | Var id | Let {id; _} | Array {id; _} -> id
 
 let graph : t Fastdom.graph = {
   successors = begin fun f acc ->
@@ -92,6 +98,7 @@ let graph : t Fastdom.graph = {
       | String _ | Var _ | Let _ -> acc
       | Tuple {data; _} -> List.fold_left f_ acc data
       | Record {data; _} -> List.fold_left f_field acc data
+      | Array {data; _} -> Array.fold_left f_ acc data
       | Constructor {data; _} -> f_ acc data
       | Cons {car; cdr; _} -> f_ (f_ acc car) cdr
     and f_field acc (_, v) =
@@ -164,6 +171,8 @@ let explicit_sharing t =
         unshared_constructor t.tag (traverse_child t.data)
       | Cons t ->
         unshared_cons (traverse_child t.car) (traverse_child t.cdr)
+      | Array t ->
+        unshared_array (Array.map traverse_child t.data)
     in
     match List.map traverse_binding bindings with
     | [] -> t
@@ -221,6 +230,7 @@ let rec sub_print_as_is =
           | [] -> assert false
         )
     end
+  | Array {id=_; data} -> true, OCaml.array print_as_is data
   | String {id=_; data} -> true, OCaml.string data
   | Tuple {id=_; data} ->
     true, OCaml.tuple (List.map print_as_is data)
