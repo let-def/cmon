@@ -144,7 +144,8 @@ let () =
   print "rec-term4" (Cmon.of_lazy rec_term4);
   print "rec-term4'" (Cmon.tuple [Cmon.of_lazy rec_term4; Cmon.of_lazy rec_term4']);
   print "rec-term5" (Cmon.tuple [Cmon.of_lazy rec_term4; Cmon.of_lazy rec_term4'; shared_term1; shared_term1]);
-  let rec rec_term5 = lazy (Cmon.cons shared_term1 (Cmon.of_lazy rec_term5'))
-  and rec_term5'= lazy (Cmon.cons shared_term1 (Cmon.of_lazy rec_term5))
+  let rec rec_term6 = lazy (Cmon.cons shared_term1 (Cmon.of_lazy rec_term6'))
+  and rec_term6'= lazy (Cmon.cons shared_term1 (Cmon.of_lazy rec_term6))
   in
-  print "rec-term6" (Cmon.tuple [Cmon.of_lazy rec_term5; Cmon.of_lazy rec_term5'; shared_term2]);
+  print "rec-term6" (Cmon.tuple [Cmon.of_lazy rec_term6; Cmon.of_lazy rec_term6']);
+  print "rec-term7" (Cmon.tuple [Cmon.of_lazy rec_term6; Cmon.of_lazy rec_term6'; shared_term2]);
