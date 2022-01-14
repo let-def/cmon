@@ -28,7 +28,7 @@ type id = private int
     for structured values) extended with variables and let-bindings
     to represent sharing.
 *)
-type syntax =
+type t = private
   | Unit               (* () *)
   | Nil                (* [] *)
   | Bool of bool       (* true, false *)
@@ -39,20 +39,16 @@ type syntax =
   | Nativeint of nativeint (* 0n, 1n, ... *)
   | Float of float     (* 0.0, 1.0, ... *)
   | Constant of string (* constant constructor, e.g None *)
-  | Cons of {id: id; car: syntax; cdr: syntax} (* x :: xs *)
+  | Cons of {id: id; car: t; cdr: t} (* x :: xs *)
   | String of {id: id; data: string} (* "Foo" *)
-  | Tuple of {id: id; data: syntax list} (* (a, b, c) ... *)
-  | Record of {id: id; data: (string * syntax) list} (* {a: va; b: vb} *)
-  | Constructor of {id: id; tag: string; data: syntax} (* Some foo *)
-  | Array of {id: id; data: syntax array}
+  | Tuple of {id: id; data: t list} (* (a, b, c) ... *)
+  | Record of {id: id; data: (string * t) list} (* {a: va; b: vb} *)
+  | Constructor of {id: id; tag: string; data: t} (* Some foo *)
+  | Array of {id: id; data: t array}
   (* Please, don't touch this array, it is immutable, trust me! *)
+  | Lazy of {id: id; data: t lazy_t}
   | Var of id          (* x *)
-  | Let of {id: id; bindings: (id * syntax) list; body: syntax}
-
-type t = private syntax
-(** A sub-type of [syntax] that is guaranteed to represent well-scoped
-    values.  ([Var] nodes always refer to variables bound by an
-    enclosing [Let]). *)
+  | Let of {id: id; recursive: bool; bindings: (id * t) list; body: t}
 
 (** Primitive values *)
 
@@ -142,6 +138,9 @@ val unshared_construct: string -> t list -> t
 val unshared_crecord: string -> (string * t) list -> t
 val unshared_list: t list -> t
 val unshared_array: t array -> t
+
+(* Representing recursion *)
+val of_lazy : t lazy_t -> t
 
 val explicit_sharing: t -> t
 (** Rewrite a value, introducing let-binders to make sharing explicit. *)

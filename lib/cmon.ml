@@ -19,7 +19,7 @@ type id = int let id_k = ref 0
 let id = fun () -> incr id_k; !id_k
 let unshared = 0
 
-type syntax =
+type t =
   | Unit
   | Nil
   | Bool of bool
@@ -30,16 +30,15 @@ type syntax =
   | Nativeint of nativeint
   | Float of float
   | Constant of string
-  | Cons of {id: id; car: syntax; cdr: syntax}
+  | Cons of {id: id; car: t; cdr: t}
   | String of {id: id; data: string}
-  | Tuple of {id: id; data: syntax list}
-  | Record of {id: id; data: (string * syntax) list}
-  | Constructor of {id: id; tag: string; data: syntax}
-  | Array of {id: id; data: syntax array}
+  | Tuple of {id: id; data: t list}
+  | Record of {id: id; data: (string * t) list}
+  | Constructor of {id: id; tag: string; data: t}
+  | Array of {id: id; data: t array}
+  | Lazy of {id: id; data: t lazy_t}
   | Var of id
-  | Let of {id: id; bindings: (id * syntax) list; body: syntax}
-
-type t = syntax
+  | Let of {id: id; recursive: bool; bindings: (id * t) list; body: t}
 
 let nil  = Nil
 let unit = Unit
@@ -88,7 +87,7 @@ let id_of = function
   | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
   | Float _ | Nil | Unit | Constant _ -> unshared
   | Tuple {id; _} | Record {id; _} | Constructor {id; _} | Cons {id; _}
-  | String {id; _} | Var id | Let {id; _} | Array {id; _} -> id
+  | String {id; _} | Var id | Let {id; _} | Array {id; _} | Lazy {id; _} -> id
 
 let graph : t Fastdom.graph = {
   successors = begin fun f acc ->
@@ -96,6 +95,7 @@ let graph : t Fastdom.graph = {
       | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
       | Float _ | Nil | Unit | Constant _
       | String _ | Var _ | Let _ -> acc
+      | Lazy {data = lazy t; _} -> f_ acc t
       | Tuple {data; _} -> List.fold_left f_ acc data
       | Record {data; _} -> List.fold_left f_field acc data
       | Array {data; _} -> Array.fold_left f_ acc data
@@ -127,42 +127,56 @@ let explicit_sharing t =
   let postorder, dominance = Fastdom.dominance graph t in
   let count = Array.length postorder in
   let bindings = Array.make count [] in
-  let var_ids = Array.make count (-1) in
+  let var_name = Array.make count (-1) in
   let share tag = match Fastdom.predecessors tag with
-    | [] | [_] -> false
+    | [] -> false
+    | [_] -> Fastdom.node tag == t
     | _ :: _ :: _ -> true
   in
-  let fresh_id = ref 0 in
+  let fresh_name = ref 0 in
   for i = count - 1 downto 0 do
     let tag = postorder.(i) in
     if share tag then begin
-      let id = !fresh_id in
-      incr fresh_id;
-      var_ids.(i) <- id;
+      let name = !fresh_name in
+      incr fresh_name;
+      var_name.(i) <- name;
       let dominator = Fastdom.dominator tag in
       let index = Fastdom.postorder_index dominator in
-      let binding = (id, Fastdom.node tag) in
-      bindings.(index) <- binding :: bindings.(index);
+      bindings.(index) <- (name, tag) :: bindings.(index)
     end
   done;
   let dominance t =
     if id_of t = unshared then None else Some (dominance t)
   in
+  let null_binding = (ref 0, ref 0) in
+  let rec_bindings = Array.make count null_binding in
   let rec traverse ~is_binding t =
+    let cursor = ref min_int in
     let bindings, t =
       match dominance t with
       | None -> ([], t)
       | Some tag ->
-        let dominator = Fastdom.dominator tag in
         let id = Fastdom.postorder_index tag in
-        if not is_binding && share tag && dominator != tag
-        then ([], Var var_ids.(id))
-        else (bindings.(id), t)
+        if share tag && not is_binding then (
+          let (ridx, cursor) = rec_bindings.(id) in
+          if !cursor > !ridx then ridx := !cursor;
+          ([], Var var_name.(id))
+        ) else
+          match bindings.(id) with
+          | [] -> ([], t)
+          | bindings' ->
+            bindings.(id) <- [];
+            List.iter (fun (_, tag) ->
+                let id = Fastdom.postorder_index tag in
+                rec_bindings.(id) <- (ref min_int, cursor))
+              bindings';
+            (bindings', t)
     in
     let t = match t with
       | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
       | Float _ | Nil | Unit | Constant _
       | String _ | Var _ | Let _ -> t
+      | Lazy {data = lazy t; _} -> traverse_child t
       | Tuple t ->
         unshared_tuple (List.map traverse_child t.data)
       | Record t ->
@@ -174,15 +188,42 @@ let explicit_sharing t =
       | Array t ->
         unshared_array (Array.map traverse_child t.data)
     in
-    match List.map traverse_binding bindings with
+    match List.mapi traverse_binding bindings with
     | [] -> t
-    | bindings -> Let {id=id(); bindings; body = t}
+    | bindings ->
+      let intro_let group body =
+        match List.rev group with
+        | [] -> body
+        | bindings -> Let {id=id(); recursive=false; bindings; body}
+      in
+      let rec visit_bindings bindings index = function
+        | [] -> intro_let bindings t
+        | (var, ridx, t') :: xs ->
+          if !ridx < index then
+            visit_bindings ((var, t') :: bindings) (index + 1) xs
+          else
+            intro_let bindings
+              (recgroup [(var, t')] (index + 1) !ridx xs)
+      and recgroup bindings index upto = function
+        | (var, ridx, t') :: xs when upto >= index ->
+          let upto = if !ridx > upto then !ridx else upto in
+          recgroup ((var, t') :: bindings) (index + 1) upto xs
+        | xs ->
+          Let {id=id(); recursive=true; bindings=List.rev bindings;
+               body=visit_bindings [] index xs}
+      in
+      visit_bindings [] 0 bindings
   and traverse_child t =
     traverse ~is_binding:false t
-  and traverse_binding (id, t) =
-    (id, traverse ~is_binding:true t)
+  and traverse_binding index (var, tag) =
+    let recidx, cursor = rec_bindings.(Fastdom.postorder_index tag) in
+    cursor := index;
+    (var, recidx, traverse ~is_binding:true (Fastdom.node tag))
   in
-  traverse_child t
+  traverse ~is_binding:true t
+
+(*let explicit_sharing t =
+  explicit_sharing (Lazy {id=id(); data=lazy t})*)
 
 let rec list_of_cons acc = function
   | Cons {id = _; car; cdr} -> list_of_cons (car :: acc) cdr
@@ -211,6 +252,10 @@ let rec sub_print_as_is =
   | Int64 i -> true, OCaml.int64 i
   | Nativeint i -> true, OCaml.nativeint i
   | Float f -> true, OCaml.float f
+  | Lazy {id=_; data=lazy t} as t' ->
+    if t == t'
+    then (true, string "<cycle>")
+    else sub_print_as_is t
   | Cons _ as self ->
     begin match list_of_cons [] self with
       | items, None ->
@@ -219,11 +264,11 @@ let rec sub_print_as_is =
         false,
         group (
           let print_one item =
-            group (string "::" ^/^ item) ^^ break 1
+            group (string "::" ^/^ item)
           in
           let rec print = function
             | [] -> print_one (print_as_is cdr)
-            | x :: xs -> print_one (print_as_is x) ^^ print xs
+            | x :: xs -> print_one (print_as_is x) ^^ break 1 ^^ print xs
           in
           match items with
           | x :: xs -> print_as_is x ^^ break 1 ^^ print xs
@@ -247,7 +292,7 @@ let rec sub_print_as_is =
     in
     false, group (string tag ^^ blank 1 ^^ doc)
   | Var id -> true, string ("v" ^ string_of_int id)
-  | Let {id=_; bindings; body} ->
+  | Let {id=_; recursive; bindings; body} ->
     let rec print_bindings prefix = function
       | [] -> string "in"
       | (id, value) :: values ->
@@ -264,7 +309,8 @@ let rec sub_print_as_is =
         in
         doc ^/^ print_bindings "and" values
     in
-    let bindings = group (print_bindings "let" bindings) in
+    let prefix = if recursive then "let rec" else "let" in
+    let bindings = group (print_bindings prefix bindings) in
     false,
     bindings ^/^
     print_as_is body
@@ -282,3 +328,5 @@ let format_as_is ppf t : unit =
 
 let print t : PPrint.document = print_as_is (explicit_sharing t)
 let format ppf t : unit = format_as_is ppf (explicit_sharing t)
+
+let of_lazy data = Lazy {id=id(); data}
