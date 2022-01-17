@@ -123,6 +123,12 @@ let graph : t Fastdom.graph = {
   end;
 }
 
+type occurrence = {
+  mutable min_scope: int;
+  mutable max_scope: int;
+  cursor: int ref;
+}
+
 let explicit_sharing t =
   let postorder, dominance = Fastdom.dominance graph t in
   let count = Array.length postorder in
@@ -145,8 +151,8 @@ let explicit_sharing t =
       bindings.(index) <- (name, tag) :: bindings.(index)
     end
   done;
-  let null_binding = (ref 0, ref 0) in
-  let rec_bindings = Array.make count null_binding in
+  let null_occurrence = {min_scope = 0; max_scope = 0; cursor = ref 0} in
+  let rec_occurrences = Array.make count null_occurrence in
   let rec traverse ~is_binding t =
     let cursor = ref min_int in
     let bindings, t =
@@ -156,19 +162,28 @@ let explicit_sharing t =
         let tag = dominance t in
         let id = Fastdom.postorder_index tag in
         if share tag && not is_binding then (
-          let (ridx, cursor) = rec_bindings.(id) in
-          if !cursor > !ridx then ridx := !cursor;
+          let occ = rec_occurrences.(id) in
+          let cursor = !(occ.cursor) in
+          if cursor > occ.max_scope then
+            occ.max_scope <- cursor;
+          if cursor < occ.min_scope then
+            occ.min_scope <- cursor;
           ([], Var var_name.(id))
-        ) else
+        ) else (
           match bindings.(id) with
           | [] -> ([], t)
           | bindings' ->
             bindings.(id) <- [];
             List.iter (fun (_, tag) ->
-                let id = Fastdom.postorder_index tag in
-                rec_bindings.(id) <- (ref min_int, cursor))
+                rec_occurrences.(Fastdom.postorder_index tag) <- {
+                  min_scope = max_int;
+                  max_scope = min_int;
+                  cursor;
+                }
+              )
               bindings';
             (bindings', t)
+        )
     in
     let t = match t with
       | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
@@ -196,15 +211,15 @@ let explicit_sharing t =
       in
       let rec visit_bindings bindings index = function
         | [] -> intro_let bindings t
-        | (var, ridx, t') :: xs ->
-          if !ridx < index then
+        | (var, occ, t') :: xs ->
+          if occ.max_scope < index then
             visit_bindings ((var, t') :: bindings) (index + 1) xs
           else
             intro_let bindings
-              (recgroup [(var, t')] (index + 1) !ridx xs)
+              (recgroup [(var, t')] (index + 1) occ.max_scope xs)
       and recgroup bindings index upto = function
-        | (var, ridx, t') :: xs when upto >= index ->
-          let upto = if !ridx > upto then !ridx else upto in
+        | (var, occ, t') :: xs when upto >= index ->
+          let upto = if occ.max_scope > upto then occ.max_scope else upto in
           recgroup ((var, t') :: bindings) (index + 1) upto xs
         | xs ->
           Let {id=id(); recursive=true; bindings=List.rev bindings;
@@ -214,9 +229,9 @@ let explicit_sharing t =
   and traverse_child t =
     traverse ~is_binding:false t
   and traverse_binding index (var, tag) =
-    let recidx, cursor = rec_bindings.(Fastdom.postorder_index tag) in
-    cursor := index;
-    (var, recidx, traverse ~is_binding:true (Fastdom.node tag))
+    let occ = rec_occurrences.(Fastdom.postorder_index tag) in
+    occ.cursor := index;
+    (var, occ, traverse ~is_binding:true (Fastdom.node tag))
   in
   traverse ~is_binding:true t
 
