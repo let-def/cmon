@@ -129,7 +129,7 @@ let () =
     Cmon.tuple [shared_term3; shared_term2'] in
   print "shared-terms" shared_term4;
 
-(* Recursion test *)
+  (* Recursion test *)
   let rec rec_term1 = lazy (Cmon.cons (Cmon.int 1) (Cmon.of_lazy rec_term1)) in
   print "rec-term1" (Cmon.of_lazy rec_term1);
   let rec rec_term2 =
@@ -137,7 +137,7 @@ let () =
                                     (Cmon.of_lazy rec_term2))) in
   print "rec-term2" (Cmon.of_lazy rec_term2);
   (*let rec rec_term3 = lazy (Cmon.of_lazy rec_term3) in
-  print "rec-term3" (Cmon.of_lazy rec_term3);*)
+    print "rec-term3" (Cmon.of_lazy rec_term3);*)
   let rec rec_term4 = lazy (Cmon.cons (Cmon.int 1) (Cmon.of_lazy rec_term4'))
   and rec_term4'= lazy (Cmon.cons (Cmon.int 2) (Cmon.of_lazy rec_term4))
   in
@@ -148,4 +148,28 @@ let () =
   and rec_term6'= lazy (Cmon.cons shared_term1 (Cmon.of_lazy rec_term6))
   in
   print "rec-term6" (Cmon.tuple [Cmon.of_lazy rec_term6; Cmon.of_lazy rec_term6']);
-  print "rec-term7" (Cmon.tuple [Cmon.of_lazy rec_term6; Cmon.of_lazy rec_term6'; shared_term2]);
+
+  (* Multiple let bindings group *)
+  print "binding-group" (
+    (*
+      let x = K A
+      and y = K B
+      in
+      let rec
+        z = x :: w
+      and
+        w = y :: z
+      in
+      let a = K C in
+      (x, y, z, w, a, a)
+    *)
+    let t_x = Cmon.constructor "K" (Cmon.constant "A") in
+    let t_y = Cmon.constructor "K" (Cmon.constant "B") in
+    let rec
+      t_z = lazy (Cmon.cons t_x (Cmon.of_lazy t_w))
+    and
+      t_w = lazy (Cmon.cons t_y (Cmon.of_lazy t_z))
+    in
+    let t_a = Cmon.constructor "K" (Cmon.constant "C") in
+    Cmon.tuple [t_x; t_y; Cmon.of_lazy t_z; Cmon.of_lazy t_w; t_a; t_a]
+  )

@@ -19,6 +19,9 @@ type id = int let id_k = ref 0
 let id = fun () -> incr id_k; !id_k
 let unshared = 0
 
+type var = int ref
+let var_id : var -> int = (!)
+
 type t =
   | Unit
   | Nil
@@ -37,8 +40,8 @@ type t =
   | Constructor of {id: id; tag: string; data: t}
   | Array of {id: id; data: t array}
   | Lazy of {id: id; data: t lazy_t}
-  | Var of id
-  | Let of {id: id; recursive: bool; bindings: (id * t) list; body: t}
+  | Var of var
+  | Let of {id: id; recursive: bool; bindings: (var * t) list; body: t}
 
 let nil  = Nil
 let unit = Unit
@@ -85,9 +88,9 @@ let unshared_crecord tag data = unshared_constructor tag (unshared_record data)
 
 let id_of = function
   | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
-  | Float _ | Nil | Unit | Constant _ -> unshared
+  | Float _ | Nil | Unit | Constant _ | Var _ -> unshared
   | Tuple {id; _} | Record {id; _} | Constructor {id; _} | Cons {id; _}
-  | String {id; _} | Var id | Let {id; _} | Array {id; _} | Lazy {id; _} -> id
+  | String {id; _} | Let {id; _} | Array {id; _} | Lazy {id; _} -> id
 
 let graph : t Fastdom.graph = {
   successors = begin fun f acc ->
@@ -125,7 +128,6 @@ let graph : t Fastdom.graph = {
 
 type occurrence = {
   mutable min_scope: int;
-  mutable max_scope: int;
   cursor: int ref;
 }
 
@@ -133,28 +135,27 @@ let explicit_sharing t =
   let postorder, dominance = Fastdom.dominance graph t in
   let count = Array.length postorder in
   let bindings = Array.make count [] in
-  let var_name = Array.make count (-1) in
+  let var_name = Array.make count (ref min_int) in
   let share tag = match Fastdom.predecessors tag with
     | [] -> false
     | [_] -> Fastdom.node tag == t
     | _ :: _ :: _ -> true
   in
-  let fresh_name = ref 0 in
   for i = count - 1 downto 0 do
     let tag = postorder.(i) in
     if share tag then begin
-      let name = !fresh_name in
-      incr fresh_name;
+      let name = ref min_int in
       var_name.(i) <- name;
       let dominator = Fastdom.dominator tag in
       let index = Fastdom.postorder_index dominator in
       bindings.(index) <- (name, tag) :: bindings.(index)
     end
   done;
-  let null_occurrence = {min_scope = 0; max_scope = 0; cursor = ref 0} in
+  let null_occurrence = {min_scope = 0; cursor = ref 0} in
   let rec_occurrences = Array.make count null_occurrence in
+  let fresh_name = ref 0 in
   let rec traverse ~is_binding t =
-    let cursor = ref min_int in
+    let cursor = ref max_int in
     let bindings, t =
       if id_of t = unshared then
         ([], t)
@@ -163,25 +164,21 @@ let explicit_sharing t =
         let id = Fastdom.postorder_index tag in
         if share tag && not is_binding then (
           let occ = rec_occurrences.(id) in
-          let cursor = !(occ.cursor) in
-          if cursor > occ.max_scope then
-            occ.max_scope <- cursor;
-          if cursor < occ.min_scope then
-            occ.min_scope <- cursor;
+          if !(occ.cursor) < occ.min_scope then
+            occ.min_scope <- !(occ.cursor);
           ([], Var var_name.(id))
         ) else (
           match bindings.(id) with
           | [] -> ([], t)
           | bindings' ->
             bindings.(id) <- [];
-            List.iter (fun (_, tag) ->
-                rec_occurrences.(Fastdom.postorder_index tag) <- {
-                  min_scope = max_int;
-                  max_scope = min_int;
-                  cursor;
-                }
-              )
-              bindings';
+            let init_occurrence (_, tag) =
+              rec_occurrences.(Fastdom.postorder_index tag) <- {
+                min_scope = max_int;
+                cursor;
+              }
+            in
+            List.iter init_occurrence bindings';
             (bindings', t)
         )
     in
@@ -204,64 +201,52 @@ let explicit_sharing t =
     match List.mapi traverse_binding bindings with
     | [] -> t
     | bindings ->
-      let rec normalize_scopes max_scope = function
-        | [] -> max_int
-        | (_, occ, _) :: occs ->
-          let max_scope =
-            if max_scope > occ.max_scope then
-              (occ.max_scope <- max_scope; max_scope)
-            else
-              occ.max_scope
-          in
-          let min_scope = normalize_scopes max_scope occs in
-          let min_scope =
-            if min_scope < occ.min_scope then
-              (occ.min_scope <- min_scope; min_scope)
-            else
-              occ.min_scope
-          in
+      let normalize_scope (_, occ, _) min_scope =
+        if min_scope < occ.min_scope then (
+          occ.min_scope <- min_scope;
           min_scope
+        ) else
+          occ.min_scope
       in
-      ignore (normalize_scopes min_int bindings : int);
-      (* Algorithm
-
-          If min_scope > index, enter a non-recursive binding groups.
-          Take all following non-recursive bindings with index < min_scope.
-
-          Enter a non-recursive let binding group.
-
-          Otherwise, min_scope <= index. Take all consecutive bindings
-          That have the same min_scope ?!.
-      *)
-      let rec group_bindings index = function
-        | [] -> [], t
-        | (var, occ, t') :: bindings ->
-          let tail, body = group_bindings (index + 1) bindings in
-          if occ.max_scope > index then
-            () (*HA*)
+      ignore (List.fold_right normalize_scope bindings max_int : int);
+      let prepare ~recursive group =
+        let group = if recursive then group else List.rev group in
+        List.iter (fun (var, _) ->
+            var := !fresh_name;
+            incr fresh_name
+          ) group;
+        group
       in
-      let intro_let group body =
-        match List.rev group with
+      let let_ ~recursive group body =
+        match group with
         | [] -> body
-        | bindings -> Let {id=id(); recursive=false; bindings; body}
+        | bindings -> Let {id=id(); recursive; bindings; body}
       in
-      let rec visit_bindings bindings index = function
-        | [] -> intro_let bindings t
-        | (var, occ, t') :: xs ->
-          if occ.min_scope <= index && index <= occ.max_scope then
-            intro_let bindings
-              (recgroup [(var, t')] (index + 1) occ.max_scope xs)
-          else
-            visit_bindings ((var, t') :: bindings) (index + 1) xs
-      and recgroup bindings index = function
-        | (var, occ, t') :: xs when upto >= index ->
-          let upto = if occ.max_scope > upto then occ.max_scope else upto in
-          recgroup ((var, t') :: bindings) (index + 1) upto xs
-        | xs ->
-          Let {id=id(); recursive=true; bindings=List.rev bindings;
-               body=visit_bindings [] index xs}
+      let rec nonrec_bindings group scope_limit index = function
+        | [] ->
+          let group = prepare ~recursive:false group in
+          let_ ~recursive:false group t
+        | (var, occ, t') :: bindings when occ.min_scope > index ->
+          if index >= scope_limit then (
+            let group = prepare ~recursive:false group in
+            let_ ~recursive:false group
+              (nonrec_bindings [var, t'] (index + 1) occ.min_scope bindings)
+          ) else
+            nonrec_bindings
+              ((var, t') :: group)
+              (min occ.min_scope scope_limit) (index + 1) bindings
+        | bindings ->
+          let group = prepare ~recursive:false group in
+          let_ ~recursive:false group (rec_bindings [] index bindings)
+      and rec_bindings group index = function
+        | (var, occ, t') :: bindings when occ.min_scope <= index ->
+          rec_bindings ((var, t') :: group) (index + 1) bindings
+        | bindings ->
+          let group = prepare ~recursive:true group in
+          let_ ~recursive:true group
+            (nonrec_bindings [] max_int index bindings)
       in
-      visit_bindings [] 0 bindings
+      nonrec_bindings [] max_int 0 bindings
   and traverse_child t =
     traverse ~is_binding:false t
   and traverse_binding index (var, tag) =
@@ -340,12 +325,12 @@ let rec sub_print_as_is =
       else OCaml.tuple [sub_doc]
     in
     false, group (string tag ^^ blank 1 ^^ doc)
-  | Var id -> true, string ("v" ^ string_of_int id)
+  | Var id -> true, string ("v" ^ string_of_int !id)
   | Let {id=_; recursive; bindings; body} ->
     let rec print_bindings prefix = function
       | [] -> string "in"
       | (id, value) :: values ->
-        let id = string ("v" ^ string_of_int id) in
+        let id = string ("v" ^ string_of_int !id) in
         let doc = print_as_is value in
         let need_break = match value with Let _ -> true | _ -> false in
         let doc =
