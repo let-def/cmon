@@ -42,13 +42,13 @@ type t =
 
 let nil  = Nil
 let unit = Unit
-let bool   data = Bool data
-let char   data = Char data
-let int    data = Int data
-let int32  data = Int32 data
-let int64  data = Int64 data
+let bool data = Bool data
+let char data = Char data
+let int data = Int data
+let int32 data = Int32 data
+let int64 data = Int64 data
 let nativeint data = Nativeint data
-let float  data = Float data
+let float data = Float data
 let string data = String {id=id(); data}
 let constant tag = Constant tag
 let constructor tag data = Constructor {id=id(); tag; data}
@@ -145,17 +145,15 @@ let explicit_sharing t =
       bindings.(index) <- (name, tag) :: bindings.(index)
     end
   done;
-  let dominance t =
-    if id_of t = unshared then None else Some (dominance t)
-  in
   let null_binding = (ref 0, ref 0) in
   let rec_bindings = Array.make count null_binding in
   let rec traverse ~is_binding t =
     let cursor = ref min_int in
     let bindings, t =
-      match dominance t with
-      | None -> ([], t)
-      | Some tag ->
+      if id_of t = unshared then
+        ([], t)
+      else
+        let tag = dominance t in
         let id = Fastdom.postorder_index tag in
         if share tag && not is_binding then (
           let (ridx, cursor) = rec_bindings.(id) in
