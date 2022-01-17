@@ -204,6 +204,42 @@ let explicit_sharing t =
     match List.mapi traverse_binding bindings with
     | [] -> t
     | bindings ->
+      let rec normalize_scopes max_scope = function
+        | [] -> max_int
+        | (_, occ, _) :: occs ->
+          let max_scope =
+            if max_scope > occ.max_scope then
+              (occ.max_scope <- max_scope; max_scope)
+            else
+              occ.max_scope
+          in
+          let min_scope = normalize_scopes max_scope occs in
+          let min_scope =
+            if min_scope < occ.min_scope then
+              (occ.min_scope <- min_scope; min_scope)
+            else
+              occ.min_scope
+          in
+          min_scope
+      in
+      ignore (normalize_scopes min_int bindings : int);
+      (* Algorithm
+
+          If min_scope > index, enter a non-recursive binding groups.
+          Take all following non-recursive bindings with index < min_scope.
+
+          Enter a non-recursive let binding group.
+
+          Otherwise, min_scope <= index. Take all consecutive bindings
+          That have the same min_scope ?!.
+      *)
+      let rec group_bindings index = function
+        | [] -> [], t
+        | (var, occ, t') :: bindings ->
+          let tail, body = group_bindings (index + 1) bindings in
+          if occ.max_scope > index then
+            () (*HA*)
+      in
       let intro_let group body =
         match List.rev group with
         | [] -> body
@@ -212,12 +248,12 @@ let explicit_sharing t =
       let rec visit_bindings bindings index = function
         | [] -> intro_let bindings t
         | (var, occ, t') :: xs ->
-          if occ.max_scope < index then
-            visit_bindings ((var, t') :: bindings) (index + 1) xs
-          else
+          if occ.min_scope <= index && index <= occ.max_scope then
             intro_let bindings
               (recgroup [(var, t')] (index + 1) occ.max_scope xs)
-      and recgroup bindings index upto = function
+          else
+            visit_bindings ((var, t') :: bindings) (index + 1) xs
+      and recgroup bindings index = function
         | (var, occ, t') :: xs when upto >= index ->
           let upto = if occ.max_scope > upto then occ.max_scope else upto in
           recgroup ((var, t') :: bindings) (index + 1) upto xs
