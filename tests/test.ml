@@ -20,13 +20,11 @@ let () =
   print "true"  (Cmon.bool true);
 
   (* Integers *)
-  print "0"       (Cmon.int 0);
-  print "1"       (Cmon.int 1);
-  print "2"       (Cmon.int 2);
-  print "-1"      (Cmon.int (-1));
-  print "-2"      (Cmon.int (-2));
-  print "max_int" (Cmon.int max_int);
-  print "min_int" (Cmon.int min_int);
+  print "0"  (Cmon.int 0);
+  print "1"  (Cmon.int 1);
+  print "2"  (Cmon.int 2);
+  print "-1" (Cmon.int (-1));
+  print "-2" (Cmon.int (-2));
 
   (* Floats *)
   print "0."        (Cmon.float 0.0);
@@ -40,11 +38,11 @@ let () =
   print "min_float" (Cmon.float min_float);
 
   (* Chars *)
-  print "'a'"    (Cmon.char 'a');
+  print "'a'"     (Cmon.char 'a');
   print "'\\x00'" (Cmon.char '\x00');
   print "'\\xFF'" (Cmon.char '\xFF');
-  print "'\\t'"    (Cmon.char '\t');
-  print "'\\n'"    (Cmon.char '\n');
+  print "'\\t'"   (Cmon.char '\t');
+  print "'\\n'"   (Cmon.char '\n');
 
   (* Strings *)
   print "\"foo\"" (Cmon.string "foo");
