@@ -24,8 +24,7 @@ type id = private int
     Variable names are automatically generated.
 *)
 
-type var
-val var_id : var -> int
+type var = id
 
 (** The output is the syntax of OCaml values (with unique identifiers
     for structured values) extended with variables and let-bindings
@@ -50,7 +49,7 @@ type t = private
   | Array of {id: id; data: t array}
   (* Please, don't touch this array, it is immutable, trust me! *)
   | Lazy of {id: id; data: t lazy_t}
-  | Var of var         (* x *)
+  | Var of id  (* x *)
   | Let of {id: id; recursive: bool; bindings: (var * t) list; body: t}
 
 (** Primitive values *)

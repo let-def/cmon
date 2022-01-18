@@ -15,12 +15,12 @@
  *)
 
 
-type id = int let id_k = ref 0
+type id = int
+let id_k = ref 0
 let id = fun () -> incr id_k; !id_k
 let unshared = 0
 
-type var = int ref
-let var_id : var -> int = (!)
+type var = id
 
 type t =
   | Unit
@@ -135,7 +135,7 @@ let explicit_sharing t =
   let postorder, dominance = Fastdom.dominance graph t in
   let count = Array.length postorder in
   let bindings = Array.make count [] in
-  let var_name = Array.make count (ref min_int) in
+  let var_name = Array.make count unshared in
   let share tag = match Fastdom.predecessors tag with
     | [] -> false
     | [_] -> Fastdom.node tag == t
@@ -144,7 +144,7 @@ let explicit_sharing t =
   for i = count - 1 downto 0 do
     let tag = postorder.(i) in
     if share tag then begin
-      let name = ref min_int in
+      let name = id() in
       var_name.(i) <- name;
       let dominator = Fastdom.dominator tag in
       let index = Fastdom.postorder_index dominator in
@@ -153,7 +153,6 @@ let explicit_sharing t =
   done;
   let null_occurrence = {min_scope = 0; cursor = ref 0} in
   let rec_occurrences = Array.make count null_occurrence in
-  let fresh_name = ref 0 in
   let rec traverse ~is_binding t =
     let cursor = ref max_int in
     let bindings, t =
@@ -209,26 +208,18 @@ let explicit_sharing t =
           occ.min_scope
       in
       ignore (List.fold_right normalize_scope bindings max_int : int);
-      let prepare ~recursive group =
-        let group = if recursive then group else List.rev group in
-        List.iter (fun (var, _) ->
-            var := !fresh_name;
-            incr fresh_name
-          ) group;
-        group
-      in
       let let_ ~recursive group body =
         match group with
         | [] -> body
-        | bindings -> Let {id=id(); recursive; bindings; body}
+        | bindings ->
+          let bindings = if recursive then bindings else List.rev bindings in
+          Let {id=id(); recursive; bindings; body}
       in
       let rec nonrec_bindings group scope_limit index = function
         | [] ->
-          let group = prepare ~recursive:false group in
           let_ ~recursive:false group t
         | (var, occ, t') :: bindings when occ.min_scope > index ->
           if index >= scope_limit then (
-            let group = prepare ~recursive:false group in
             let_ ~recursive:false group
               (nonrec_bindings [var, t'] (index + 1) occ.min_scope bindings)
           ) else
@@ -236,13 +227,11 @@ let explicit_sharing t =
               ((var, t') :: group)
               (min occ.min_scope scope_limit) (index + 1) bindings
         | bindings ->
-          let group = prepare ~recursive:false group in
           let_ ~recursive:false group (rec_bindings [] index bindings)
       and rec_bindings group index = function
         | (var, occ, t') :: bindings when occ.min_scope <= index ->
           rec_bindings ((var, t') :: group) (index + 1) bindings
         | bindings ->
-          let group = prepare ~recursive:true group in
           let_ ~recursive:true group
             (nonrec_bindings [] max_int index bindings)
       in
@@ -273,85 +262,99 @@ let print_record f fields =
   let fields = List.fold_left add_field PPrint.empty fields in
   PPrint.(group (string "{" ^^ nest 2 fields ^/^ string "}"))
 
-let rec sub_print_as_is =
+let print_as_is var_name doc =
   let open PPrint in
-  function
-  | Unit    -> true, string "()"
-  | Nil     -> true, string "[]"
-  | Constant tag -> true, string tag
-  | Bool b  -> true, OCaml.bool b
-  | Char c  -> true, OCaml.char c
-  | Int  i  -> true, OCaml.int i
-  | Int32 i -> true, OCaml.int32 i
-  | Int64 i -> true, OCaml.int64 i
-  | Nativeint i -> true, OCaml.nativeint i
-  | Float f -> true, OCaml.float f
-  | Lazy {id=_; data=lazy t} as t' ->
-    if t == t'
-    then (true, string "<cycle>")
-    else sub_print_as_is t
-  | Cons _ as self ->
-    begin match list_of_cons [] self with
-      | items, None ->
-        true, OCaml.list print_as_is items
-      | items, Some cdr ->
-        false,
-        group (
-          let print_one item =
-            group (string "::" ^/^ item)
+  let rec sub_print_as_is = function
+    | Unit    -> true, string "()"
+    | Nil     -> true, string "[]"
+    | Constant tag -> true, string tag
+    | Bool b  -> true, OCaml.bool b
+    | Char c  -> true, OCaml.char c
+    | Int  i  -> true, OCaml.int i
+    | Int32 i -> true, OCaml.int32 i
+    | Int64 i -> true, OCaml.int64 i
+    | Nativeint i -> true, OCaml.nativeint i
+    | Float f -> true, OCaml.float f
+    | Lazy {id=_; data=lazy t} as t' ->
+      if t == t'
+      then (true, string "<cycle>")
+      else sub_print_as_is t
+    | Cons _ as self ->
+      begin match list_of_cons [] self with
+        | items, None ->
+          true, OCaml.list print_as_is items
+        | items, Some cdr ->
+          false,
+          group (
+            let print_one item =
+              group (string "::" ^/^ item)
+            in
+            let rec print = function
+              | [] -> print_one (print_as_is cdr)
+              | x :: xs -> print_one (print_as_is x) ^^ break 1 ^^ print xs
+            in
+            match items with
+            | x :: xs -> print_as_is x ^^ break 1 ^^ print xs
+            | [] -> assert false
+          )
+      end
+    | Array {id=_; data} -> true, OCaml.array print_as_is data
+    | String {id=_; data} -> true, OCaml.string data
+    | Tuple {id=_; data} ->
+      true, OCaml.tuple (List.map print_as_is data)
+    | Record {id=_; data} ->
+      true,
+      (*OCaml.record "" (List.map (fun (k,v) -> k, print_as_is v) data)*)
+      print_record (fun (k,v) -> k, print_as_is v) data
+    | Constructor {id=_; tag; data} ->
+      let delimited, sub_doc = sub_print_as_is data in
+      let doc =
+        if delimited
+        then sub_doc
+        else OCaml.tuple [sub_doc]
+      in
+      false, group (string tag ^^ blank 1 ^^ doc)
+    | Var id -> true, string (var_name id)
+    | Let {id=_; recursive; bindings; body} ->
+      let rec print_bindings prefix = function
+        | [] -> string "in"
+        | (id, value) :: values ->
+          let doc = print_as_is value in
+          let need_break = match value with Let _ -> true | _ -> false in
+          let doc =
+            group @@
+            if need_break
+            then group (string prefix ^/^ id ^/^ string "=") ^^
+                 nest 2 (break 1 ^^ doc)
+            else group (string prefix ^/^ id ^/^ string "= ") ^^
+                 nest 2 doc
           in
-          let rec print = function
-            | [] -> print_one (print_as_is cdr)
-            | x :: xs -> print_one (print_as_is x) ^^ break 1 ^^ print xs
-          in
-          match items with
-          | x :: xs -> print_as_is x ^^ break 1 ^^ print xs
-          | [] -> assert false
-        )
-    end
-  | Array {id=_; data} -> true, OCaml.array print_as_is data
-  | String {id=_; data} -> true, OCaml.string data
-  | Tuple {id=_; data} ->
-    true, OCaml.tuple (List.map print_as_is data)
-  | Record {id=_; data} ->
-    true,
-    (*OCaml.record "" (List.map (fun (k,v) -> k, print_as_is v) data)*)
-    print_record (fun (k,v) -> k, print_as_is v) data
-  | Constructor {id=_; tag; data} ->
-    let delimited, sub_doc = sub_print_as_is data in
-    let doc =
-      if delimited
-      then sub_doc
-      else OCaml.tuple [sub_doc]
-    in
-    false, group (string tag ^^ blank 1 ^^ doc)
-  | Var id -> true, string ("v" ^ string_of_int !id)
-  | Let {id=_; recursive; bindings; body} ->
-    let rec print_bindings prefix = function
-      | [] -> string "in"
-      | (id, value) :: values ->
-        let id = string ("v" ^ string_of_int !id) in
-        let doc = print_as_is value in
-        let need_break = match value with Let _ -> true | _ -> false in
-        let doc =
-          group @@
-          if need_break
-          then group (string prefix ^/^ id ^/^ string "=") ^^
-               nest 2 (break 1 ^^ doc)
-          else group (string prefix ^/^ id ^/^ string "= ") ^^
-               nest 2 doc
-        in
-        doc ^/^ print_bindings "and" values
-    in
-    let prefix = if recursive then "let rec" else "let" in
-    let bindings = group (print_bindings prefix bindings) in
-    false,
-    bindings ^/^
-    print_as_is body
+          doc ^/^ print_bindings "and" values
+      in
+      let name_binding (id, value) = (string (var_name id), value) in
+      let prefix = if recursive then "let rec" else "let" in
+      let bindings = List.map name_binding bindings in
+      let bindings = group (print_bindings prefix bindings) in
+      false,
+      bindings ^/^
+      print_as_is body
+  and print_as_is doc =
+    let _delim, doc = sub_print_as_is doc in
+    doc
+  in
+  print_as_is doc
 
-and print_as_is doc =
-  let _delim, doc = sub_print_as_is doc in
-  doc
+let print_as_is doc =
+  let table = Hashtbl.create 7 in
+  let var_name id =
+    match Hashtbl.find_opt table id with
+    | Some name -> name
+    | None ->
+      let name = "v" ^ string_of_int (Hashtbl.length table) in
+      Hashtbl.replace table id name;
+      name
+  in
+  print_as_is var_name doc
 
 let format_document ppf doc : unit =
   let margin = Format.pp_get_margin ppf () in
