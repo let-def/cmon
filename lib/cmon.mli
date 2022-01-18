@@ -30,7 +30,7 @@ type var = id
     for structured values) extended with variables and let-bindings
     to represent sharing.
 *)
-type t = private
+type t =
   | Unit               (* () *)
   | Nil                (* [] *)
   | Bool of bool       (* true, false *)
@@ -47,7 +47,6 @@ type t = private
   | Record of {id: id; data: (string * t) list} (* {a: va; b: vb} *)
   | Constructor of {id: id; tag: string; data: t} (* Some foo *)
   | Array of {id: id; data: t array}
-  (* Please, don't touch this array, it is immutable, trust me! *)
   | Lazy of {id: id; data: t lazy_t}
   | Var of id  (* x *)
   | Let of {id: id; recursive: bool; bindings: (var * t) list; body: t}

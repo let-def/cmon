@@ -133,32 +133,38 @@ val Cmon.format : Format.formatter -> t -> unit
 
 ## Inspecting `Cmon.t` values
 
-`Cmon.t` is defined as a private alias of an algebraic type: 
+`Cmon.t` is defined as an algebraic type: 
 
 ```ocaml
-type syntax =
+type t =
   | Unit               (* () *)
   | Nil                (* [] *)
   | Bool of bool       (* true, false *)
   | Char of char       (* 'x' *)
   | Int of int         (* 0, 1, ... *)
+  | Int32 of int32     (* 0l, 1l, ... *)
+  | Int64 of int64     (* 0L, 1L, ... *)
+  | Nativeint of nativeint (* 0n, 1n, ... *)
   | Float of float     (* 0.0, 1.0, ... *)
   | Constant of string (* constant constructor, e.g None *)
-  | Cons of {id: id; car: syntax; cdr: syntax} (* x :: xs *)
+  | Cons of {id: id; car: t; cdr: t} (* x :: xs *)
   | String of {id: id; data: string} (* "Foo" *)
-  | Tuple of {id: id; data: syntax list} (* (a, b, c) ... *)
-  | Record of {id: id; data: (string * syntax) list} (* {a: va; b: vb} *)
-  | Constructor of {id: id; tag: string; data: syntax} (* Some foo *)
-  | Var of id          (* x *)
-  | Let of {id: id; bindings: (id * syntax) list; body: syntax}
-
-type t = private syntax
-
+  | Tuple of {id: id; data: t list} (* (a, b, c) ... *)
+  | Record of {id: id; data: (string * t) list} (* {a: va; b: vb} *)
+  | Constructor of {id: id; tag: string; data: t} (* Some foo *)
+  | Array of {id: id; data: t array}
+  | Lazy of {id: id; data: t lazy_t}
+  | Var of id  (* x *)
+  | Let of {id: id; recursive: bool; bindings: (var * t) list; body: t}
 ```
 
-It is possible to match on `Cmon.t` values and inspect their structure, but it is not possible to create new ones directly; one has to use the public functions.
+It is possible to match on `Cmon.t` values, inspect their structure, and create
+new values. This is useful for debugging and understanding how Cmon works but
+not recommended in normal use (one could easily create "unbound" variables by
+messing with the structure). Stick to the public functions.
 
-The `Cmon.explicit_sharing` function can reveal the sharing that would be displayed by the `print` functions:
+The `Cmon.explicit_sharing` function can reveal the sharing that would be
+displayed by the `print` functions:
 
 ```ocaml
 # let c = Cmon.tuple [s; s];;
