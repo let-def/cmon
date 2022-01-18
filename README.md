@@ -181,13 +181,21 @@ Let
   body = Tuple {Cmon.id = 0; data = [Var 0; Var 0]}}
 ```
 
-To print without introducing more sharing, the `_as_is` variants are provided:
+Printing is done either with the `print` or `format` functions:
 
 ```ocaml
 val Cmon.print : t -> PPrint.document
 val Cmon.format : Format.formatter -> t -> unit
 ```
 
-Mixing `explicit_sharing` and `print_as_is` can be useful to print composite documents while "controlling" sharing boundaries.
+To print without introducing more sharing, the `_as_is` variants are provided:
+
+```ocaml
+val Cmon.print_as_is : t -> PPrint.document
+val Cmon.format_as_is : Format.formatter -> t -> unit
+```
+
+Mixing `explicit_sharing` and `print_as_is` can be useful to print composite
+documents while "controlling" sharing boundaries.
 
 ## 
