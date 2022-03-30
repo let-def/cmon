@@ -150,7 +150,6 @@ val print_as_is: t -> PPrint.document
 (** Print the value as it is (without changing sharing) to a
     [PPrint.document]. *)
 
-
 val print: t -> PPrint.document
 (** Print the value with explicit sharing to a [PPrint.document].
     [print t == print_as_is (explicit_sharing t)]. *)
@@ -176,3 +175,37 @@ val format: Format.formatter -> t -> unit
     utop # Cmon.unit;;
     - : Cmon.t = ()
 *)
+
+(* Generic code to reveal sharing in user-defined data structures *)
+
+(** Representation of a graph with nodes of type 'a *)
+type 'a graph = 'a Fastdom.graph = {
+  memoize: 'b. ('a -> 'b) -> ('a -> 'b);
+  (** Memoize a function on nodes *)
+
+  successors: 'b. ('b -> 'a -> 'b) -> 'b -> 'a -> 'b;
+  (** Fold over successors of a node *)
+}
+
+(** Rewrite a (possibly cyclic) directed graph by introducing
+    let-binders at dominating nodes *)
+
+type ('term, 'var) binding_structure = {
+
+  (* Rewrite subterms of a term with a custom function *)
+  map_subterms: ('term -> 'term) -> 'term -> 'term;
+
+  (* Produce a fresh variable for a term *)
+  name_term: 'term -> 'var;
+
+  (* Injection from variable to terms *)
+  var_term: 'var -> 'term;
+
+  (* [introduce_let ~recursive bindings body] create a possibly recursive
+     let-binder term that binds the names in [bindings] in the scope of [body]
+  *)
+  introduce_let: recursive:bool -> ('var * 'term) list -> 'term -> 'term;
+}
+
+val explicit_sharing_generic :
+  'a graph -> ('a, 'b) binding_structure -> 'a -> 'a

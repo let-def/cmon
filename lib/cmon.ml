@@ -14,6 +14,138 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+(* Generic code to reveal sharing in a cyclic graph *)
+
+type 'a graph = 'a Fastdom.graph = {
+  memoize: 'b. ('a -> 'b) -> ('a -> 'b);
+  successors: 'b. ('b -> 'a -> 'b) -> 'b -> 'a -> 'b;
+}
+
+type ('term, 'var) binding_structure = {
+
+  (* Rewrite subterms of a term with a custom function *)
+  map_subterms: ('term -> 'term) -> 'term -> 'term;
+
+  (* Produce a fresh variable for a term *)
+  name_term: 'term -> 'var;
+
+  (* Injection from variable to terms *)
+  var_term: 'var -> 'term;
+
+  (* [introduce_let ~recursive bindings body] create a possibly recursive
+     let-binder term that binds the names in [bindings] in the scope of [body]
+  *)
+  introduce_let: recursive:bool -> ('var * 'term) list -> 'term -> 'term;
+}
+
+type occurrence = {
+  mutable min_scope: int;
+  cursor: int ref;
+}
+
+let explicit_sharing_generic
+    (type a b) (gr : a Fastdom.graph) (bs : (a, b) binding_structure) t =
+  let postorder, dominance = Fastdom.dominance gr t in
+  let count = Array.length postorder in
+  let bindings = Array.make count [] in
+  let var_name = Array.make count None in
+  let share tag = match Fastdom.predecessors tag with
+    | [] -> false
+    | [_] -> Fastdom.node tag == t
+    | _ :: _ :: _ -> true
+  in
+  for i = count - 1 downto 0 do
+    let tag = postorder.(i) in
+    if share tag then begin
+      let node = Fastdom.node tag in
+      let var = bs.name_term node in
+      var_name.(i) <- Some (bs.var_term var);
+      let dominator = Fastdom.dominator tag in
+      let index = Fastdom.postorder_index dominator in
+      bindings.(index) <- (var, tag) :: bindings.(index)
+    end
+  done;
+  let null_occurrence = {min_scope = 0; cursor = ref 0} in
+  let rec_occurrences = Array.make count null_occurrence in
+  let rec traverse ~is_binding t =
+    let cursor = ref max_int in
+    let bindings, t =
+      let tag = dominance t in
+      let id = Fastdom.postorder_index tag in
+      if id = -1 then
+        ([], t)
+      else
+        match var_name.(id) with
+        | Some name when not is_binding ->
+          let occ = rec_occurrences.(id) in
+          if !(occ.cursor) < occ.min_scope then
+            occ.min_scope <- !(occ.cursor);
+          ([], name)
+        | _ ->
+          match bindings.(id) with
+          | [] -> ([], t)
+          | bindings' ->
+            bindings.(id) <- [];
+            let init_occurrence (_, tag) =
+              rec_occurrences.(Fastdom.postorder_index tag) <- {
+                min_scope = max_int;
+                cursor;
+              }
+            in
+            List.iter init_occurrence bindings';
+            (bindings', t)
+    in
+    let t = bs.map_subterms traverse_child t in
+    match List.mapi traverse_binding bindings with
+    | [] -> t
+    | bindings ->
+      let normalize_scope (_, occ, _) min_scope =
+        if min_scope < occ.min_scope then (
+          occ.min_scope <- min_scope;
+          min_scope
+        ) else
+          occ.min_scope
+      in
+      ignore (List.fold_right normalize_scope bindings max_int : int);
+      let let_ ~recursive group body =
+        match group with
+        | [] -> body
+        | bindings ->
+          bs.introduce_let ~recursive
+            (if recursive then bindings else List.rev bindings)
+            body
+      in
+      let rec nonrec_bindings group scope_limit index = function
+        | [] ->
+          let_ ~recursive:false group t
+        | (var, occ, t') :: bindings when occ.min_scope > index ->
+          if index >= scope_limit then (
+            let_ ~recursive:false group
+              (nonrec_bindings [var, t'] (index + 1) occ.min_scope bindings)
+          ) else
+            nonrec_bindings
+              ((var, t') :: group)
+              (min occ.min_scope scope_limit) (index + 1) bindings
+        | bindings ->
+          let_ ~recursive:false group (rec_bindings [] index bindings)
+      and rec_bindings group index = function
+        | (var, occ, t') :: bindings when occ.min_scope <= index ->
+          rec_bindings ((var, t') :: group) (index + 1) bindings
+        | bindings ->
+          let_ ~recursive:true group
+            (nonrec_bindings [] max_int index bindings)
+      in
+      nonrec_bindings [] max_int 0 bindings
+  and traverse_child t =
+    traverse ~is_binding:false t
+  and traverse_binding index (var, tag) =
+    let occ = rec_occurrences.(Fastdom.postorder_index tag) in
+    occ.cursor := index;
+    (var, occ, traverse ~is_binding:true (Fastdom.node tag))
+  in
+  traverse ~is_binding:true t
+
+(* Basic cmon definitions *)
 
 type id = int
 let id_k = ref 0
@@ -86,6 +218,8 @@ let unshared_construct tag = function
 let crecord tag data = constructor tag (unshared_record data)
 let unshared_crecord tag data = unshared_constructor tag (unshared_record data)
 
+(* Graph traversal and sharing *)
+
 let id_of = function
   | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
   | Float _ | Nil | Unit | Constant _ | Var _ -> unshared
@@ -126,127 +260,42 @@ let graph : t Fastdom.graph = {
   end;
 }
 
-type occurrence = {
-  mutable min_scope: int;
-  cursor: int ref;
+let binding_structure = {
+  name_term = (fun _ -> id ());
+  var_term = (fun id -> Var id);
+  map_subterms = begin fun f t ->
+    let rec sub_map = function
+      | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
+      | Float _ | Nil | Unit | Constant _
+      | String _ | Var _ | Let _ as t -> t
+      | Lazy {data = lazy t; _} -> f' t
+      | Tuple t ->
+        unshared_tuple (List.map f' t.data)
+      | Record t ->
+        unshared_record (List.map (fun (k,v) -> k, f' v) t.data)
+      | Constructor t ->
+        unshared_constructor t.tag (f' t.data)
+      | Cons t ->
+        unshared_cons (f' t.car) (f' t.cdr)
+      | Array t ->
+        unshared_array (Array.map f' t.data)
+    and f' t =
+      if id_of t = unshared then
+        sub_map t
+      else
+        f t
+    in
+    sub_map t
+  end;
+  introduce_let = begin fun ~recursive bindings body ->
+    Let {id=id(); recursive; bindings; body}
+  end;
 }
 
 let explicit_sharing t =
-  let postorder, dominance = Fastdom.dominance graph t in
-  let count = Array.length postorder in
-  let bindings = Array.make count [] in
-  let var_name = Array.make count unshared in
-  let share tag = match Fastdom.predecessors tag with
-    | [] -> false
-    | [_] -> Fastdom.node tag == t
-    | _ :: _ :: _ -> true
-  in
-  for i = count - 1 downto 0 do
-    let tag = postorder.(i) in
-    if share tag then begin
-      let name = id() in
-      var_name.(i) <- name;
-      let dominator = Fastdom.dominator tag in
-      let index = Fastdom.postorder_index dominator in
-      bindings.(index) <- (name, tag) :: bindings.(index)
-    end
-  done;
-  let null_occurrence = {min_scope = 0; cursor = ref 0} in
-  let rec_occurrences = Array.make count null_occurrence in
-  let rec traverse ~is_binding t =
-    let cursor = ref max_int in
-    let bindings, t =
-      if id_of t = unshared then
-        ([], t)
-      else
-        let tag = dominance t in
-        let id = Fastdom.postorder_index tag in
-        if share tag && not is_binding then (
-          let occ = rec_occurrences.(id) in
-          if !(occ.cursor) < occ.min_scope then
-            occ.min_scope <- !(occ.cursor);
-          ([], Var var_name.(id))
-        ) else (
-          match bindings.(id) with
-          | [] -> ([], t)
-          | bindings' ->
-            bindings.(id) <- [];
-            let init_occurrence (_, tag) =
-              rec_occurrences.(Fastdom.postorder_index tag) <- {
-                min_scope = max_int;
-                cursor;
-              }
-            in
-            List.iter init_occurrence bindings';
-            (bindings', t)
-        )
-    in
-    let t = match t with
-      | Bool _ | Char _ | Int _ | Int32 _ | Int64 _ | Nativeint _
-      | Float _ | Nil | Unit | Constant _
-      | String _ | Var _ | Let _ -> t
-      | Lazy {data = lazy t; _} -> traverse_child t
-      | Tuple t ->
-        unshared_tuple (List.map traverse_child t.data)
-      | Record t ->
-        unshared_record (List.map (fun (k,v) -> k, traverse_child v) t.data)
-      | Constructor t ->
-        unshared_constructor t.tag (traverse_child t.data)
-      | Cons t ->
-        unshared_cons (traverse_child t.car) (traverse_child t.cdr)
-      | Array t ->
-        unshared_array (Array.map traverse_child t.data)
-    in
-    match List.mapi traverse_binding bindings with
-    | [] -> t
-    | bindings ->
-      let normalize_scope (_, occ, _) min_scope =
-        if min_scope < occ.min_scope then (
-          occ.min_scope <- min_scope;
-          min_scope
-        ) else
-          occ.min_scope
-      in
-      ignore (List.fold_right normalize_scope bindings max_int : int);
-      let let_ ~recursive group body =
-        match group with
-        | [] -> body
-        | bindings ->
-          let bindings = if recursive then bindings else List.rev bindings in
-          Let {id=id(); recursive; bindings; body}
-      in
-      let rec nonrec_bindings group scope_limit index = function
-        | [] ->
-          let_ ~recursive:false group t
-        | (var, occ, t') :: bindings when occ.min_scope > index ->
-          if index >= scope_limit then (
-            let_ ~recursive:false group
-              (nonrec_bindings [var, t'] (index + 1) occ.min_scope bindings)
-          ) else
-            nonrec_bindings
-              ((var, t') :: group)
-              (min occ.min_scope scope_limit) (index + 1) bindings
-        | bindings ->
-          let_ ~recursive:false group (rec_bindings [] index bindings)
-      and rec_bindings group index = function
-        | (var, occ, t') :: bindings when occ.min_scope <= index ->
-          rec_bindings ((var, t') :: group) (index + 1) bindings
-        | bindings ->
-          let_ ~recursive:true group
-            (nonrec_bindings [] max_int index bindings)
-      in
-      nonrec_bindings [] max_int 0 bindings
-  and traverse_child t =
-    traverse ~is_binding:false t
-  and traverse_binding index (var, tag) =
-    let occ = rec_occurrences.(Fastdom.postorder_index tag) in
-    occ.cursor := index;
-    (var, occ, traverse ~is_binding:true (Fastdom.node tag))
-  in
-  traverse ~is_binding:true t
+  explicit_sharing_generic graph binding_structure t
 
-(*let explicit_sharing t =
-  explicit_sharing (Lazy {id=id(); data=lazy t})*)
+(* Pretty-printing *)
 
 let rec list_of_cons acc = function
   | Cons {id = _; car; cdr} -> list_of_cons (car :: acc) cdr
