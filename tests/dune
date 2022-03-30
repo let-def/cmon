@@ -3,6 +3,11 @@
  (modules test)
  (libraries cmon))
 
+(executable
+ (name test_generic)
+ (modules test_generic)
+ (libraries cmon))
+
 (rule
  (alias runtest)
  (action
@@ -12,3 +17,7 @@
  (alias runtest)
  (deps test.exe)
  (action (diff test.expected test.exe.output)))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:test_generic.exe})))
