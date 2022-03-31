@@ -121,7 +121,7 @@ let explicit_sharing_generic
         | (var, occ, t') :: bindings when occ.min_scope > index ->
           if index >= scope_limit then (
             let_ ~recursive:false group
-              (nonrec_bindings [var, t'] (index + 1) occ.min_scope bindings)
+              (nonrec_bindings [var, t'] occ.min_scope (index + 1) bindings)
           ) else
             nonrec_bindings
               ((var, t') :: group)
