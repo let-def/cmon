@@ -287,3 +287,18 @@ let rec v2 = v0 :: v3 and v3 = v1 :: v2 in
 let v4 = K C in
 (v0, v1, v2, v3, v4, v4)
 
+regression-test-scope-limit:
+let v0 = Block (0, Done) in
+let v1 = blockTag v0 in
+let rec v2 = blockFields v0 in
+or (
+  and (= (v1, 0), (_ is (Done () Fields)) v2),
+  let v3 = fieldNext v2 in
+  and (
+    = (v1, 1),
+    (_ is (Done () Fields)) (fieldNext v3),
+    (_ is (Field (Value Fields) Fields)) v3,
+    (_ is (Field (Value Fields) Fields)) v2
+  )
+)
+

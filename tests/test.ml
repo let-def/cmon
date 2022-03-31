@@ -170,4 +170,25 @@ let () =
     in
     let t_a = Cmon.constructor "K" (Cmon.constant "C") in
     Cmon.tuple [t_x; t_y; Cmon.of_lazy t_z; Cmon.of_lazy t_w; t_a; t_a]
-  )
+  );
+
+  (* Regression testing: bug with scope limit *)
+  print "regression-test-scope-limit" (
+    let v_4 = Cmon.construct "Block" [Cmon.int 0; Cmon.Constant "Done"] in
+    let v_3 = Cmon.construct "blockTag" [v_4] in
+    let v_2 = Cmon.construct "blockFields" [v_4] in
+    let v_1 = Cmon.construct "fieldNext" [v_2] in
+    Cmon.construct "or" [
+      Cmon.construct "and" [
+        Cmon.construct "=" [v_3; Cmon.int 0];
+        Cmon.construct "(_ is (Done () Fields))" [v_2];
+      ];
+      Cmon.construct "and" [
+        Cmon.construct "=" [v_3; Cmon.int 1];
+        Cmon.construct "(_ is (Done () Fields))"
+          [Cmon.construct "fieldNext" [v_1]];
+        Cmon.construct "(_ is (Field (Value Fields) Fields))" [v_1];
+        Cmon.construct "(_ is (Field (Value Fields) Fields))" [v_2];
+      ];
+    ]
+  );
