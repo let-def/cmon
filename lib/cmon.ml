@@ -115,17 +115,20 @@ let explicit_sharing_generic
             (if recursive then bindings else List.rev bindings)
             body
       in
-      let rec nonrec_bindings group scope_limit index = function
+      let rec nonrec_bindings group ~scope_limit ~index = function
         | [] ->
           let_ ~recursive:false group t
         | (var, occ, t') :: bindings when occ.min_scope > index ->
           if index >= scope_limit then (
             let_ ~recursive:false group
-              (nonrec_bindings [var, t'] occ.min_scope (index + 1) bindings)
+              (nonrec_bindings [var, t']
+                 ~scope_limit:occ.min_scope
+                 ~index:(index + 1) bindings)
           ) else
             nonrec_bindings
               ((var, t') :: group)
-              (min occ.min_scope scope_limit) (index + 1) bindings
+              ~scope_limit:(min occ.min_scope scope_limit)
+              ~index:(index + 1) bindings
         | bindings ->
           let_ ~recursive:false group (rec_bindings [] index bindings)
       and rec_bindings group index = function
@@ -133,9 +136,9 @@ let explicit_sharing_generic
           rec_bindings ((var, t') :: group) (index + 1) bindings
         | bindings ->
           let_ ~recursive:true group
-            (nonrec_bindings [] max_int index bindings)
+            (nonrec_bindings [] ~scope_limit:max_int ~index bindings)
       in
-      nonrec_bindings [] max_int 0 bindings
+      nonrec_bindings [] ~scope_limit:max_int ~index:0 bindings
   and traverse_child t =
     traverse ~is_binding:false t
   and traverse_binding index (var, tag) =
