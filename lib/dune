@@ -1,4 +1,4 @@
 (library
   (name cmon)
   (public_name cmon)
-  (libraries pprint grenier.fastdom))
+  (libraries pprint grenier.fastdom grenier.binder_introducer))

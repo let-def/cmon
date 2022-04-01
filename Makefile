@@ -1,11 +1,11 @@
+test:
+	dune runtest
+
 all:
 	dune build
 
 clean:
 	dune clean
-
-test:
-	dune runtest
 
 promote:
 	dune promote
