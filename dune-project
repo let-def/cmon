@@ -11,4 +11,4 @@
   (name cmon)
   (synopsis "A library for printing OCaml values with sharing")
   (depends (pprint (>= 20171003))
-           (grenier (>= 0.13))))
+           (grenier (>= 0.14))))
