@@ -9,7 +9,7 @@ bug-reports: "https://github.com/let-def/cmon/issues"
 depends: [
   "dune" {>= "2.9"}
   "pprint" {>= "20171003"}
-  "grenier" {>= "0.13"}
+  "grenier" {>= "0.14"}
   "odoc" {with-doc}
 ]
 build: [
